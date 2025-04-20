@@ -60,7 +60,7 @@ SUPABASE_KEY=your_supabase_key
 ### 5. Run the application
 
 ```bash
-python app.py
+python launch.py
 ```
 
 ### 6. Access the chat interface
