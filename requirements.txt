@@ -1,0 +1,9 @@
+openai==1.75.0
+pydub==0.25.1
+dotenv==0.9.9
+mcp==1.6.0
+supabase==2.15.0
+streamlit==1.44.1
+langchain-mcp-adapters==0.0.9
+langchain-openai==0.3.14
+langgraph==0.3.31
