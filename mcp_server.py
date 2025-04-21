@@ -234,6 +234,41 @@ def delete_member(member_id: str) -> dict:
     return response.data[0]
 
 
+@mcp.tool()
+def capture_image_from_camera() -> str:
+    """
+    Trigger frontend to open webcam and capture image.
+    """
+    print("📸 [MCP] Triggering frontend camera...")
+    return "WAITING_FOR_CLIENT"
+    
+
+
+@mcp.tool()
+def describe_image_from_camera(image_url: str) -> str:
+    """
+    Send a public image URL to GPT-4o to analyze its content.
+    """
+    print("🧠 Describing image:", image_url)
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=[{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "what's in this image?"},
+                {
+                    "type": "input_image",
+                    "image_url": image_url,
+                },
+            ],
+        }],
+    )
+
+    return response.output_text
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
+
+
+

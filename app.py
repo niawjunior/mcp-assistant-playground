@@ -1,12 +1,25 @@
 import streamlit as st
+
 from mcp_client import run_tool
 from openai import OpenAI
 import json
 from dotenv import load_dotenv
 import os
+from datetime import datetime
+import uuid
+from supabase import create_client, Client
 
 # Load .env file
 load_dotenv()
+
+
+# Supabase config
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Init Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 
 def safe_json(obj):
@@ -42,6 +55,8 @@ st.markdown("""
 st.title("💬 MCP Assistant Playground")
 st.caption("Use natural language to call MCP tools via OpenAI GPT-4o.")
 
+
+
 # -- Session history
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -70,10 +85,16 @@ Available tools and their signatures:
 - update_member(member_id: str, name?: str, email?: str, role?: str, status?: str)
 - delete_member(member_id: str)
 - text_to_speech_gpt4o(text: str, voice: str = "nova", tone: str = "cheerful")
+- capture_image_from_camera()
+- describe_image_from_camera(image_url: str)
+
+Notes:
+- If the user says something like "describe this image", "what is in the image", "analyze the photo", and there is already an image captured, use `describe_image_from_camera`.
+- If the user says "open the camera", "take a picture", "capture photo", or anything related to opening the webcam, use `capture_image_from_camera`.
+- For everything else, fallback to `chat_gpt4o`.
 
 Respond ONLY in compact JSON like:
 { "tool": "tool_name", "args": { "arg1": "value", ... } }
-Do not add explanation or formatting.
 """.strip()
 
     try:
@@ -84,22 +105,56 @@ Do not add explanation or formatting.
                 {"role": "user", "content": prompt}
             ]
         )
-        raw = response.choices[0].message.content
 
-        # ✅ Clean up if needed (optional fallback)
-        if not raw.strip().startswith("{"):
-            raise ValueError("Invalid JSON structure")
+        raw = response.choices[0].message.content.strip()
 
+        # ✅ Strip markdown formatting if present
+        if raw.startswith("```json") and raw.endswith("```"):
+            raw = raw.removeprefix("```json").removesuffix("```").strip()
+
+        # ✅ Parse JSON safely
         return json.loads(raw)
 
     except Exception as e:
+        print("❌ [ToolSelector] Invalid JSON or OpenAI error:", e)
+        print("🔎 Raw GPT Output:", raw if 'raw' in locals() else '[no response]')
         return {
             "tool": "chat_gpt4o",
             "args": {
-                "prompt": f"ERROR: {str(e)}"
+                "prompt": f"ERROR: Invalid JSON returned: {raw if 'raw' in locals() else str(e)}"
             }
         }
+        
 # -- Process input
+
+if st.session_state.get("selected_tool") in ["capture_image_from_camera", "describe_image_from_camera", "text_to_speech_gpt4o", "gen_image_dalle3", "chat_gpt4o"]:
+    st.markdown("📸 **Camera Mode Activated!**")
+
+    if "camera_enabled" not in st.session_state:
+        st.session_state.camera_enabled = False
+    if "captured_image" not in st.session_state:
+        st.session_state.captured_image = None
+
+    st.session_state.camera_enabled = st.checkbox("Enable camera", value=st.session_state.camera_enabled, key="enable_camera_capture")
+
+    if st.session_state.camera_enabled:
+        picture = st.camera_input("Take a picture")
+        if picture:
+            st.session_state.captured_image = picture
+
+    if st.session_state.captured_image:
+        image_bytes = st.session_state.captured_image.getvalue()
+
+        # Upload to Supabase
+        filename = f"camera_uploads/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}.jpg"
+        supabase.storage.from_("damage-images").upload(filename, image_bytes, {"content-type": "image/jpeg"})
+        image_url = supabase.storage.from_("damage-images").get_public_url(filename)
+        st.session_state.last_uploaded_image_url = image_url
+
+        st.markdown(f"✅ Uploaded to Supabase: `{image_url}`")
+    else:
+        st.info("📷 Please take a picture to proceed.")
+
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
 
@@ -119,6 +174,7 @@ if user_input:
 
             # Render tool response
             if tool == "gen_image_dalle3":
+                st.session_state.selected_tool = tool
                 try:
                     if hasattr(result, "content") and isinstance(result.content, list):
                         text_item = result.content[0]
@@ -134,6 +190,7 @@ if user_input:
                     content = f"❌ Error parsing image: {str(e)}"
 
             elif tool == "text_to_speech_gpt4o":
+                st.session_state.selected_tool = tool
                 try:
                     # Handle TextContent object from OpenAI SDK
                     if hasattr(result, "content") and isinstance(result.content, list):
@@ -153,9 +210,59 @@ if user_input:
                         content = f"⚠️ No audio content returned:\n\n```json\n{safe_json(result)}\n```"
                 except Exception as e:
                     content = f"❌ Error handling audio response:\n\n{str(e)}"
+            elif tool == "capture_image_from_camera":
+                st.session_state.selected_tool = tool
+                st.markdown("📸 **Camera Mode Activated!**")
+                
+                if "camera_enabled" not in st.session_state:
+                    st.session_state.camera_enabled = False
+                if "captured_image" not in st.session_state:
+                    st.session_state.captured_image = None
 
+                st.session_state.camera_enabled = st.checkbox("Enable camera", value=st.session_state.camera_enabled, key="enable_camera_capture")
+
+                if st.session_state.camera_enabled:
+                    picture = st.camera_input("Take a picture")
+                    if picture:
+                        st.session_state.captured_image = picture
+
+                if st.session_state.captured_image:
+                    st.markdown("✅ Image captured!")
+
+                    image_bytes = st.session_state.captured_image.getvalue()
+                    filename = f"camera_uploads/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}.jpg"
+                    supabase.storage.from_("damage-images").upload(filename, image_bytes, {"content-type": "image/jpeg"})
+                    image_url = supabase.storage.from_("damage-images").get_public_url(filename)
+                    st.session_state.last_uploaded_image_url = image_url
+                    st.markdown(f"📤 Uploaded to: `{image_url}`")
+                    content = f"📸 [Image captured from camera] {image_url}"
+                else:
+                    st.info("📷 Please take a picture to proceed.")
+                    content = "📷 Please take a picture to proceed."
+            elif tool == "describe_image_from_camera":
+                st.session_state.selected_tool = tool
+                image_url = st.session_state.get("last_uploaded_image_url")
+                
+                if image_url:
+                    result = run_tool("describe_image_from_camera", {"image_url": image_url})
+
+                    # ✨ Try to extract clean description
+                    if hasattr(result, "content") and isinstance(result.content, list):
+                        text_item = result.content[0]
+                        if hasattr(text_item, "text"):
+                            clean_description = text_item.text
+                        else:
+                            clean_description = str(result)
+                    else:
+                        clean_description = str(result)
+                    st.markdown(f"🔍 **Image description:**\n\n> {clean_description}")
+                    content = ""
+                else:
+                    st.info("📸 Please capture an image first.")
+                    content = "📸 Please capture an image first."
             else:
                 content = f"**✅ Tool:** `{tool}`\n\n```json\n{safe_json(result)}\n```"
 
-            st.markdown(content)
-            st.session_state.messages.append({"role": "assistant", "content": content})
+            if content.strip():
+                st.markdown(content)
+                st.session_state.messages.append({"role": "assistant", "content": content})
