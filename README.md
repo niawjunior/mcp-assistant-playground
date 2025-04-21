@@ -1,6 +1,10 @@
 # 💬 MCP Assistant Playground
 
+https://github.com/user-attachments/assets/c60a59c0-5ff5-487e-be47-bdcc8253fbc8
+
+
 https://github.com/user-attachments/assets/85e7453f-950d-41a4-a1f5-1abd3a587067
+
 
 
 A Streamlit-based chatbot interface powered by OpenAI GPT-4o that intelligently routes user input to custom MCP tools such as GPT chat, image generation, Supabase queries, and text-to-speech.
